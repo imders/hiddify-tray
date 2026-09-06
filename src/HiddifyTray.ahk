@@ -432,7 +432,7 @@ SpeedText() {
             dd := 0
         if (uu < 0)
             uu := 0
-        out := "vv " Rate(dd) "   ^^ " Rate(uu)
+        out := "↓ " Rate(dd) "   ↑ " Rate(uu)
     }
     gPrevDown := d
     gPrevUp := u
