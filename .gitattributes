@@ -1,0 +1,6 @@
+# Проект целиком под Windows: PowerShell и AutoHotkey ожидают CRLF
+* text=auto eol=crlf
+
+# Бинарные ресурсы не трогать
+*.ico binary
+*.png binary

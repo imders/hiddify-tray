@@ -1,0 +1,15 @@
+# журнал работы трея - содержит историю подключений
+*.log
+hiddifytray.log
+
+# конфиги и настройки Hiddify: профили, подписки, секреты
+current-config.json
+shared_preferences.json
+*.sqlite
+*.db
+
+# локальные сборки и временное
+*.tmp
+*.bak
+Thumbs.db
+desktop.ini
