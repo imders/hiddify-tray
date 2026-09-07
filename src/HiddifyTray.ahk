@@ -25,6 +25,8 @@ global TaskStop     := "Hiddify_Stop"
 global PollInterval := 2500                           ; мс
 global WaitTimeout  := 30000                          ; сколько ждём выполнения команды
 global AutoOnStart  := true                           ; поднимать VPN при запуске скрипта
+global AutoHideWin  := true                           ; прятать окно, открывшееся при автозапуске
+global HideWindowMs := 45000                          ; сколько после старта считаем окно автозапускным
 ; -----------------
 
 global gCtrl := "127.0.0.1:16756", gSecret := ""
@@ -37,6 +39,9 @@ global gAnim := false
 ; отключение через окно Hiddify внешне неотличимо от обрыва, и включённая
 ; опция переподключала бы VPN против воли.
 global gAutoRecover := false
+; Hiddify при старте разворачивает окно. Прячем его, но только то,
+; что появилось само при запуске: окно, открытое пользователем, не трогаем.
+global gProcSeenTs := 0, gHidden := false, gUserOpened := false
 
 ReadApiCreds()
 
@@ -51,6 +56,7 @@ A_TrayMenu.Add()
 A_TrayMenu.Add("Открыть окно Hiddify", (*) => ShowHiddify())
 A_TrayMenu.Add("Завершить приложение", (*) => KillApp())
 A_TrayMenu.Add()
+A_TrayMenu.Add("Прятать окно при запуске", (*) => ToggleAutoHide())
 A_TrayMenu.Add("Подключать при запуске", (*) => ToggleAutoConnect())
 A_TrayMenu.Add("Восстанавливать при обрыве", (*) => ToggleAutoRecover())
 A_TrayMenu.Add("Автозапуск при входе", (*) => ToggleAutostart())
@@ -60,6 +66,8 @@ A_TrayMenu.Add("Перезагрузить скрипт", (*) => Reload())
 A_TrayMenu.Add("Выход", (*) => ExitApp())
 if gAutoConnect
     A_TrayMenu.Check("Подключать при запуске")
+if AutoHideWin
+    A_TrayMenu.Check("Прятать окно при запуске")
 RefreshAutostartCheck()
 
 OnMessage(0x404, TrayClick)
@@ -183,8 +191,21 @@ CoreRunning() {
 
 UpdateStatus() {
     global gState, gTheme, gPrevTick, gWant, gWantTs, gWarned
+    global gProcSeenTs, gHidden, gUserOpened
 
     running := ProcessExist("Hiddify.exe") ? true : false
+
+    ; Засекаем момент появления процесса, чтобы отличить окно, которое
+    ; Hiddify открыл сам при старте, от окна, открытого пользователем.
+    if (running && gProcSeenTs = 0)
+        gProcSeenTs := A_TickCount
+    if (!running) {
+        gProcSeenTs := 0
+        gHidden := false
+        gUserOpened := false
+    }
+    HideStartupWindow(running)
+
     core := false
     if running {
         core := CoreRunning()
@@ -248,6 +269,35 @@ UpdateStatus() {
         gPrevTick := 0
     }
     A_IconTip := SubStr(tip, 1, 126)
+}
+
+; Hiddify при запуске разворачивает своё окно. Прячем его, но только
+; в первые HideWindowMs после появления процесса: всё, что пользователь
+; открыл сам, трогать нельзя.
+HideStartupWindow(running) {
+    global AutoHideWin, HideWindowMs, gProcSeenTs, gHidden, gUserOpened
+    if (!AutoHideWin || !running || gHidden || gUserOpened)
+        return
+    if (gProcSeenTs = 0 || (A_TickCount - gProcSeenTs) > HideWindowMs)
+        return
+    hwnd := WinExist("ahk_exe Hiddify.exe")
+    if !hwnd
+        return
+    try {
+        WinHide("ahk_id " hwnd)
+        gHidden := true
+        LogLine("окно Hiddify скрыто после автозапуска")
+    }
+}
+
+ToggleAutoHide() {
+    global AutoHideWin
+    AutoHideWin := !AutoHideWin
+    if AutoHideWin
+        A_TrayMenu.Check("Прятать окно при запуске")
+    else
+        A_TrayMenu.Uncheck("Прятать окно при запуске")
+    TrayTip("Скрытие окна при запуске " (AutoHideWin ? "включено" : "выключено"), "Hiddify")
 }
 
 CurrentTheme() {
@@ -373,9 +423,20 @@ ShowHiddify() {
         RunTask(TaskStart)
         return
     }
-    if WinExist("ahk_exe Hiddify.exe") {
-        WinShow()
-        WinActivate()
+    gUserOpened := true                        ; дальше окно не прячем
+    ; Окно мы могли спрятать сами - обычный WinExist его не найдёт
+    ; и мы бы запустили второй экземпляр приложения.
+    prev := A_DetectHiddenWindows
+    DetectHiddenWindows true
+    hwnd := WinExist("ahk_exe Hiddify.exe")
+    DetectHiddenWindows prev
+    if hwnd {
+        try {
+            WinShow("ahk_id " hwnd)
+            if (WinGetMinMax("ahk_id " hwnd) = -1)
+                WinRestore("ahk_id " hwnd)
+            WinActivate("ahk_id " hwnd)
+        }
     } else {
         try Run(HiddifyExe, HiddifyDir)
     }
