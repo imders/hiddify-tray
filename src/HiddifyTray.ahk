@@ -26,7 +26,8 @@ global PollInterval := 2500                           ; мс
 global WaitTimeout  := 30000                          ; сколько ждём выполнения команды
 global AutoOnStart  := true                           ; поднимать VPN при запуске скрипта
 global AutoHideWin  := true                           ; прятать окно, открывшееся при автозапуске
-global HideWindowMs := 45000                          ; сколько после старта считаем окно автозапускным
+global HideWindowMs := 60000                          ; окно автозапуска
+global HideTries    := 4                              ; больше не пытаемся: Flutter возвращает окно
 ; -----------------
 
 global gCtrl := "127.0.0.1:16756", gSecret := ""
@@ -41,7 +42,7 @@ global gAnim := false
 global gAutoRecover := false
 ; Hiddify при старте разворачивает окно. Прячем его, но только то,
 ; что появилось само при запуске: окно, открытое пользователем, не трогаем.
-global gProcSeenTs := 0, gHidden := false, gUserOpened := false
+global gProcSeenTs := 0, gHideTries := 0, gUserOpened := false
 
 ReadApiCreds()
 
@@ -191,7 +192,7 @@ CoreRunning() {
 
 UpdateStatus() {
     global gState, gTheme, gPrevTick, gWant, gWantTs, gWarned
-    global gProcSeenTs, gHidden, gUserOpened
+    global gProcSeenTs, gHideTries, gUserOpened
 
     running := ProcessExist("Hiddify.exe") ? true : false
 
@@ -201,7 +202,7 @@ UpdateStatus() {
         gProcSeenTs := A_TickCount
     if (!running) {
         gProcSeenTs := 0
-        gHidden := false
+        gHideTries := 0
         gUserOpened := false
     }
     HideStartupWindow(running)
@@ -274,19 +275,29 @@ UpdateStatus() {
 ; Hiddify при запуске разворачивает своё окно. Прячем его, но только
 ; в первые HideWindowMs после появления процесса: всё, что пользователь
 ; открыл сам, трогать нельзя.
+; ВАЖНО про надёжность: окно Hiddify нарисовано на Flutter, и оно само
+; себя восстанавливает. WinHide и WinMinimize выполняются без ошибки, но
+; окно возвращается через доли секунды - проверено замером. Поэтому здесь
+; лишь несколько попыток на самом старте (иногда успевают сработать, пока
+; приложение не закончило инициализацию), а не бесконечная борьба, от
+; которой окно мигало бы. Надёжно помогает только штатная настройка
+; Hiddify: Настройки -> Общие -> Тихий запуск.
 HideStartupWindow(running) {
-    global AutoHideWin, HideWindowMs, gProcSeenTs, gHidden, gUserOpened
-    if (!AutoHideWin || !running || gHidden || gUserOpened)
+    global AutoHideWin, HideWindowMs, HideTries, gProcSeenTs, gHideTries, gUserOpened
+    if (!AutoHideWin || !running || gUserOpened)
         return
     if (gProcSeenTs = 0 || (A_TickCount - gProcSeenTs) > HideWindowMs)
+        return
+    if (gHideTries >= HideTries)
         return
     hwnd := WinExist("ahk_exe Hiddify.exe")
     if !hwnd
         return
     try {
         WinHide("ahk_id " hwnd)
-        gHidden := true
-        LogLine("окно Hiddify скрыто после автозапуска")
+        gHideTries += 1
+        if (gHideTries = 1)
+            LogLine("прячу окно Hiddify после автозапуска")
     }
 }
 
